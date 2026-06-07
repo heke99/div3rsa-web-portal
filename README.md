@@ -1,36 +1,78 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Div3rsa Portal
 
-## Getting Started
+Kundportal och adminpanel för Div3rsa.
 
-First, run the development server:
+## Domän
+
+- Lokal: `http://localhost:3000`
+- Produktion: `https://portal.div3rsa.com`
+
+## Koppling
+
+Portalen ska använda samma Supabase-projekt som `div3rsa.com`, så ansökningar från webben kan hanteras direkt i adminpanelen.
+
+## Installation
 
 ```bash
+npm install
+cp .env.example .env.local
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Miljövariabler
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```env
+NEXT_PUBLIC_SUPABASE_URL=
+NEXT_PUBLIC_SUPABASE_ANON_KEY=
+SUPABASE_SERVICE_ROLE_KEY=
+RESEND_API_KEY=
+MAIL_FROM=info@div3rsa.com
+APP_URL=http://localhost:3000
+NEXT_PUBLIC_APP_URL=http://localhost:3000
+MARKETING_URL=https://div3rsa.com
+NEXT_PUBLIC_MARKETING_URL=https://div3rsa.com
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+I Vercel:
 
-## Learn More
+```env
+APP_URL=https://portal.div3rsa.com
+NEXT_PUBLIC_APP_URL=https://portal.div3rsa.com
+```
 
-To learn more about Next.js, take a look at the following resources:
+## Supabase
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+Kör migrationen:
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+```txt
+supabase/migrations/20260607_div3rsa_portal_foundation.sql
+```
 
-## Deploy on Vercel
+Skapa därefter första superadmin enligt `supabase/README.md`.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## MVP-funktioner
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- Login
+- Adminöversikt
+- Ansökningslista från webben
+- Ansökningsdetalj
+- Statusändring
+- Interna anteckningar
+- Skapa kund från ansökan
+- Kundlista och kundkort
+- Kundspecifik prissättning med audit
+- Portalinbjudan via aktiveringslänk
+- Aktiveringssida
+- Kunddashboard
+- Onboardingvy
+- Prisvy
+- Supportärenden
+- Audit logs
+
+## Ej byggt ännu
+
+- Full fakturaskapare
+- Capway API-integration
+- KYC-uppladdning
+- BankID
+- Bokföringsexport
