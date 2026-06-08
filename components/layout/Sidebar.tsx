@@ -6,6 +6,8 @@ const adminLinks = [
   { href: '/admin/payment-applications', label: 'Ansökningar' },
   { href: '/admin/payment-customers', label: 'Kunder' },
   { href: '/admin/invoices', label: 'Fakturor' },
+  { href: '/admin/invoice-templates', label: 'Fakturamallar' },
+  { href: '/admin/recurring-invoices', label: 'Återkommande' },
   { href: '/admin/api', label: 'API' },
   { href: '/admin/accounting-access', label: 'Accounting' },
   { href: '/admin/support', label: 'Support' },

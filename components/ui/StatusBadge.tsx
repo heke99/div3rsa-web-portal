@@ -11,6 +11,8 @@ const colors: Record<string, string> = {
   active: 'bg-emerald-50 text-emerald-700 border-emerald-200',
   rejected: 'bg-rose-50 text-rose-700 border-rose-200',
   paused: 'bg-slate-50 text-slate-700 border-slate-200',
+  ended: 'bg-slate-50 text-slate-700 border-slate-200',
+  created: 'bg-emerald-50 text-emerald-700 border-emerald-200',
   customer_created: 'bg-emerald-50 text-emerald-700 border-emerald-200',
 
   sent: 'bg-blue-50 text-blue-700 border-blue-200',

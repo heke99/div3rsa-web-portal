@@ -28,6 +28,8 @@ export const statusLabels: Record<string, string> = {
   active: 'Aktiv',
   paused: 'Pausad',
   cancelled: 'Avslutad',
+  ended: 'Avslutad',
+  created: 'Skapad',
 
   ready_to_send: 'Redo att skickas',
   sent: 'Skickad',
