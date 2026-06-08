@@ -1,12 +1,10 @@
 'use server'
 
-import crypto from 'node:crypto'
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { requireAdmin, requirePricingAdmin } from '@/lib/auth/session'
 import { applicationStatuses } from '@/lib/data/status'
-import { sendSmtpMail } from '@/lib/mail/smtp'
 
 export type ActionState = { ok: boolean; message: string }
 
@@ -161,44 +159,112 @@ export async function saveCustomerPricingAction(_prev: ActionState, formData: Fo
   return { ok: true, message: 'Prisprofil sparad.' }
 }
 
-export async function sendPortalInviteAction(_prev: ActionState, formData: FormData): Promise<ActionState> {
+
+async function findAuthUserIdByEmail(email: string) {
+  const supabase = createAdminClient()
+  const normalizedEmail = email.trim().toLowerCase()
+  const { data: portalUser } = await supabase.from('portal_users').select('id').eq('email', normalizedEmail).maybeSingle()
+  if (portalUser?.id) return portalUser.id as string
+
+  const { data } = await supabase.auth.admin.listUsers()
+  return data.users.find((authUser) => authUser.email?.toLowerCase() === normalizedEmail)?.id ?? null
+}
+
+export async function setPortalAccessPasswordAction(_prev: ActionState, formData: FormData): Promise<ActionState> {
   const user = await requirePricingAdmin()
   const customerId = String(formData.get('customer_id') || '')
+  const email = String(formData.get('email') || '').trim().toLowerCase()
+  const fullName = String(formData.get('full_name') || '').trim()
+  const role = String(formData.get('role') || 'customer_admin')
+  const password = String(formData.get('password') || '')
+  const confirmPassword = String(formData.get('confirm_password') || '')
+
   if (!customerId) return { ok: false, message: 'Kund saknas.' }
+  if (!email) return { ok: false, message: 'Ange kundens e-post.' }
+  if (!['customer_admin', 'customer_user'].includes(role)) return { ok: false, message: 'Ogiltig roll.' }
+  if (password.length < 10) return { ok: false, message: 'Lösenordet måste vara minst 10 tecken.' }
+  if (password !== confirmPassword) return { ok: false, message: 'Lösenorden matchar inte.' }
 
   const supabase = createAdminClient()
-  const { data: customer } = await supabase.from('payment_customers').select('*').eq('id', customerId).maybeSingle()
-  if (!customer?.email) return { ok: false, message: 'Kunden saknar e-post.' }
+  const { data: customer } = await supabase.from('payment_customers').select('id,company_name,contact_name,email').eq('id', customerId).maybeSingle()
+  if (!customer) return { ok: false, message: 'Kunden kunde inte hittas.' }
 
-  const token = crypto.randomBytes(32).toString('hex')
-  const tokenHash = crypto.createHash('sha256').update(token).digest('hex')
-  const expiresAt = new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString()
+  const displayName = fullName || customer.contact_name || email
+  const now = new Date().toISOString()
+  let authUserId = await findAuthUserIdByEmail(email)
+  let authAction: 'created' | 'password_updated' = 'created'
 
-  const { error: inviteError } = await supabase.from('portal_invites').insert({ customer_id: customerId, email: customer.email, role: 'customer_admin', token_hash: tokenHash, expires_at: expiresAt, created_by: user.id })
-  if (inviteError) return { ok: false, message: 'Kunde inte skapa inbjudan.' }
-
-  const appUrl = process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'
-  const activateUrl = `${appUrl}/activate?token=${token}`
-  const subject = 'Aktivera ditt konto i Div3rsa Portal'
-  const html = `<p>Hej ${customer.contact_name || ''},</p><p>Ditt konto i Div3rsa Portal är skapat.</p><p><a href="${activateUrl}">Aktivera konto</a></p><p>Länken gäller i 48 timmar.</p><p>Vänliga hälsningar,<br/>Div3rsa</p>`
-  const text = `Hej ${customer.contact_name || ''},\n\nDitt konto i Div3rsa Portal är skapat. Aktivera kontot här: ${activateUrl}\n\nLänken gäller i 48 timmar.\n\nDiv3rsa`
-  let emailStatus = 'sent'
-  let errorMessage: string | null = null
-  let providerMessageId: string | null = null
-
-  try {
-    const result = await sendSmtpMail({ to: customer.email, subject, html, text })
-    providerMessageId = typeof result.messageId === 'string' ? result.messageId : null
-  } catch (error) {
-    console.error('Portal invite SMTP error', error)
-    emailStatus = 'failed'
-    errorMessage = error instanceof Error ? error.message : 'Okänt SMTP-fel.'
+  if (authUserId) {
+    const { error } = await supabase.auth.admin.updateUserById(authUserId, {
+      password,
+      email_confirm: true,
+      user_metadata: { payment_customer_id: customerId, role },
+    })
+    if (error) return { ok: false, message: `Kunde inte sätta nytt lösenord: ${error.message}` }
+    authAction = 'password_updated'
+  } else {
+    const { data, error } = await supabase.auth.admin.createUser({
+      email,
+      password,
+      email_confirm: true,
+      user_metadata: { payment_customer_id: customerId, role },
+    })
+    if (error || !data.user) return { ok: false, message: `Kunde inte skapa portaluser: ${error?.message ?? 'Okänt fel'}` }
+    authUserId = data.user.id
   }
 
-  await supabase.from('email_logs').insert({ customer_id: customerId, email_type: 'portal_invite', recipient: customer.email, subject, status: emailStatus, provider_message_id: providerMessageId, error_message: errorMessage, sent_at: emailStatus === 'sent' ? new Date().toISOString() : null })
-  await supabase.from('payment_customers').update({ portal_status: emailStatus === 'sent' ? 'invited' : 'invite_failed' }).eq('id', customerId)
-  await logAudit({ actorUserId: user.id, actorRole: user.role, entityType: 'payment_customer', entityId: customerId, action: 'portal_invite_sent', newValues: { emailStatus, expiresAt } })
+  const { error: portalError } = await supabase.from('portal_users').upsert({
+    id: authUserId,
+    email,
+    full_name: displayName,
+    role,
+    customer_id: customerId,
+    status: 'active',
+    must_change_password: true,
+    onboarding_status: 'pending_password_change',
+    password_changed_at: null,
+    manual_password_set_at: now,
+    manual_password_set_by: user.id,
+    disabled_at: null,
+    updated_at: now,
+  }, { onConflict: 'id' })
+
+  if (portalError) return { ok: false, message: `Auth-user skapades, men portalprofilen kunde inte sparas: ${portalError.message}` }
+
+  await supabase.from('payment_customers').update({ portal_status: 'pending_password_change', updated_at: now }).eq('id', customerId)
+  await logAudit({
+    actorUserId: user.id,
+    actorRole: user.role,
+    entityType: 'payment_customer',
+    entityId: customerId,
+    action: authAction === 'created' ? 'portal_access_created_manual_password' : 'portal_password_reset_by_admin',
+    newValues: { auth_user_id: authUserId, email, role, must_change_password: true },
+  })
 
   revalidatePath(`/admin/payment-customers/${customerId}`)
-  return { ok: emailStatus !== 'failed', message: emailStatus === 'sent' ? 'Portalinbjudan skickad.' : 'Inbjudan skapad, men mail kunde inte skickas.' }
+  revalidatePath('/admin/payment-customers')
+  return { ok: true, message: authAction === 'created' ? 'Portalåtkomst skapad. Ge lösenordet till kunden manuellt.' : 'Nytt lösenord satt. Ge lösenordet till kunden manuellt.' }
+}
+
+export async function disablePortalAccessAction(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const user = await requirePricingAdmin()
+  const customerId = String(formData.get('customer_id') || '')
+  const portalUserId = String(formData.get('portal_user_id') || '')
+
+  if (!customerId || !portalUserId) return { ok: false, message: 'Kund eller portaluser saknas.' }
+
+  const supabase = createAdminClient()
+  const now = new Date().toISOString()
+  const { error } = await supabase
+    .from('portal_users')
+    .update({ status: 'inactive', onboarding_status: 'disabled', disabled_at: now, updated_at: now })
+    .eq('id', portalUserId)
+    .eq('customer_id', customerId)
+
+  if (error) return { ok: false, message: 'Kunde inte inaktivera portalåtkomst.' }
+
+  await supabase.auth.admin.updateUserById(portalUserId, { ban_duration: '876000h' })
+  await logAudit({ actorUserId: user.id, actorRole: user.role, entityType: 'portal_user', entityId: portalUserId, action: 'portal_access_disabled', newValues: { customerId } })
+  revalidatePath(`/admin/payment-customers/${customerId}`)
+  return { ok: true, message: 'Portalåtkomst inaktiverad.' }
 }

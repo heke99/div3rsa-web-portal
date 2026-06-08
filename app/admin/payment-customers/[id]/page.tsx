@@ -1,6 +1,6 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
-import { InviteForm } from '@/components/admin/InviteForm'
+import { PortalAccessForm } from '@/components/admin/PortalAccessForm'
 import { PortalLayout } from '@/components/layout/PortalLayout'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { StatusBadge } from '@/components/ui/StatusBadge'
@@ -14,10 +14,10 @@ export default async function CustomerDetailPage({ params }: { params: Promise<{
   const user = await requireAdmin()
   const { id } = await params
   const supabase = createAdminClient()
-  const [{ data: customer }, { data: pricing }, { data: invites }, { data: audits }] = await Promise.all([
+  const [{ data: customer }, { data: pricing }, { data: portalUsers }, { data: audits }] = await Promise.all([
     supabase.from('payment_customers').select('*').eq('id', id).maybeSingle(),
     supabase.from('payment_customer_pricing').select('*').eq('customer_id', id).eq('status', 'active').order('created_at', { ascending: false }).limit(1).maybeSingle(),
-    supabase.from('portal_invites').select('*').eq('customer_id', id).order('created_at', { ascending: false }).limit(5),
+    supabase.from('portal_users').select('id,email,full_name,role,status,must_change_password,onboarding_status,password_changed_at,manual_password_set_at,disabled_at').eq('customer_id', id).order('created_at', { ascending: false }).limit(5),
     supabase.from('audit_logs').select('*').eq('entity_id', id).order('created_at', { ascending: false }).limit(10),
   ])
   if (!customer) notFound()
@@ -59,8 +59,7 @@ export default async function CustomerDetailPage({ params }: { params: Promise<{
           </section>
         </div>
         <aside className="space-y-5">
-          <InviteForm customerId={id} />
-          <List title="Senaste inbjudningar" items={invites ?? []} empty="Inga inbjudningar ännu." />
+          <PortalAccessForm customerId={id} defaultEmail={customer.email} defaultName={customer.contact_name} portalUsers={portalUsers ?? []} />
           <List title="Audit" items={audits ?? []} empty="Inga audit events ännu." />
         </aside>
       </div>
