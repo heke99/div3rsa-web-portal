@@ -1,6 +1,8 @@
 import Link from 'next/link'
 import { ResetPasswordForm } from '@/components/auth/ResetPasswordForm'
 
+export const dynamic = 'force-dynamic'
+
 export default function ResetPasswordPage() {
   return (
     <main className="flex min-h-screen items-center justify-center px-4 py-12">

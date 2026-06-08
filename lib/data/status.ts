@@ -28,6 +28,22 @@ export const statusLabels: Record<string, string> = {
   active: 'Aktiv',
   paused: 'Pausad',
   cancelled: 'Avslutad',
+
+  ready_to_send: 'Redo att skickas',
+  sent: 'Skickad',
+  delivered: 'Levererad',
+  viewed: 'Visad',
+  paid: 'Betald',
+  overdue: 'Förfallen',
+  credited: 'Krediterad',
+  failed: 'Misslyckad',
+  not_enabled: 'Ej aktiverat',
+  not_connected: 'Ej ansluten',
+  pending_connection_approval: 'Väntar godkännande',
+  queued: 'Köad',
+  syncing: 'Synkar',
+  synced: 'Synkad',
+  skipped: 'Hoppad över',
 }
 
 export function statusLabel(value?: string | null) {

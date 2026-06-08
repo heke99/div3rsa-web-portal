@@ -8,6 +8,8 @@ import { requireAdmin } from '@/lib/auth/session'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { formatCurrency, formatDate, formatPercent } from '@/lib/utils/format'
 
+export const dynamic = 'force-dynamic'
+
 export default async function CustomerDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const user = await requireAdmin()
   const { id } = await params
@@ -42,7 +44,7 @@ export default async function CustomerDetailPage({ params }: { params: Promise<{
           <section className="card p-5">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <h2 className="text-xl font-black text-ink">Prisprofil</h2>
-              <Link className="btn btn-primary" href={`/admin/payment-customers/${id}/pricing`}>{pricing ? 'Ändra pris' : 'Sätt pris'}</Link>
+              <div className="flex flex-wrap gap-2"><Link className="btn btn-secondary" href={`/admin/payment-customers/${id}/features`}>Moduler</Link><Link className="btn btn-primary" href={`/admin/payment-customers/${id}/pricing`}>{pricing ? 'Ändra pris' : 'Sätt pris'}</Link></div>
             </div>
             {pricing ? (
               <div className="mt-5 grid gap-4 md:grid-cols-2">

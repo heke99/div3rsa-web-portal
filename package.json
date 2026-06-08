@@ -13,10 +13,11 @@
     "@supabase/ssr": "latest",
     "@supabase/supabase-js": "latest",
     "@tailwindcss/postcss": "^4.3.0",
-    "next": "latest",
+    "@types/nodemailer": "^8.0.0",
+    "next": "^16.2.7",
+    "nodemailer": "^8.0.10",
     "react": "latest",
     "react-dom": "latest",
-    "resend": "latest",
     "zod": "latest"
   },
   "devDependencies": {

@@ -4,6 +4,8 @@ import { PageHeader } from '@/components/ui/PageHeader'
 import { requireAdmin } from '@/lib/auth/session'
 import { createAdminClient } from '@/lib/supabase/admin'
 
+export const dynamic = 'force-dynamic'
+
 export default async function AdminDashboardPage() {
   const user = await requireAdmin()
   const supabase = createAdminClient()

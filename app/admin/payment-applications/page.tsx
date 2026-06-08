@@ -6,6 +6,8 @@ import { requireAdmin } from '@/lib/auth/session'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { formatDate } from '@/lib/utils/format'
 
+export const dynamic = 'force-dynamic'
+
 export default async function PaymentApplicationsPage({ searchParams }: { searchParams?: Promise<Record<string, string | string[] | undefined>> }) {
   const user = await requireAdmin()
   const params = await searchParams

@@ -3,6 +3,8 @@ import { PageHeader } from '@/components/ui/PageHeader'
 import { requireUser } from '@/lib/auth/session'
 import { createAdminClient } from '@/lib/supabase/admin'
 
+export const dynamic = 'force-dynamic'
+
 export default async function CompanySettingsPage() {
   const user = await requireUser()
   const supabase = createAdminClient()

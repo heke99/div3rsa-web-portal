@@ -9,6 +9,8 @@ import { requireAdmin } from '@/lib/auth/session'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { formatDate } from '@/lib/utils/format'
 
+export const dynamic = 'force-dynamic'
+
 export default async function ApplicationDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const user = await requireAdmin()
   const { id } = await params

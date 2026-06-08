@@ -5,6 +5,9 @@ const adminLinks = [
   { href: '/admin', label: 'Översikt' },
   { href: '/admin/payment-applications', label: 'Ansökningar' },
   { href: '/admin/payment-customers', label: 'Kunder' },
+  { href: '/admin/invoices', label: 'Fakturor' },
+  { href: '/admin/api', label: 'API' },
+  { href: '/admin/accounting-access', label: 'Accounting' },
   { href: '/admin/support', label: 'Support' },
   { href: '/admin/audit-logs', label: 'Audit logs' },
   { href: '/admin/users', label: 'Användare' },
@@ -12,8 +15,13 @@ const adminLinks = [
 
 const customerLinks = [
   { href: '/dashboard', label: 'Dashboard' },
-  { href: '/onboarding', label: 'Onboarding' },
-  { href: '/pricing', label: 'Pris & avtal' },
+  { href: '/invoices', label: 'Skickade fakturor' },
+  { href: '/invoice-customers', label: 'Kunder' },
+  { href: '/invoices/new', label: 'Ny faktura' },
+  { href: '/invoice-templates', label: 'Fakturamallar' },
+  { href: '/recurring-invoices', label: 'Återkommande fakturor' },
+  { href: '/api-webhooks', label: 'API & Webhooks' },
+  { href: '/accounting', label: 'Accounting' },
   { href: '/support', label: 'Support' },
   { href: '/settings/company', label: 'Företagsuppgifter' },
 ]

@@ -6,6 +6,8 @@ import { requireAdmin } from '@/lib/auth/session'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { formatDate } from '@/lib/utils/format'
 
+export const dynamic = 'force-dynamic'
+
 export default async function PaymentCustomersPage() {
   const user = await requireAdmin()
   const supabase = createAdminClient()

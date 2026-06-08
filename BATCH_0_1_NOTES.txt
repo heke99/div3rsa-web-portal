@@ -1,0 +1,1 @@
+Batch 0 + Batch 1 applied. Typecheck passes with npm run typecheck. npm run build compiles and passes TypeScript, but Next 16.2.7 still hangs/times out at Collecting page data, which was already observed in the uploaded portal before these changes.

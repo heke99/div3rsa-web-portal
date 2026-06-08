@@ -6,6 +6,8 @@ import { PageHeader } from '@/components/ui/PageHeader'
 import { requirePricingAdmin } from '@/lib/auth/session'
 import { createAdminClient } from '@/lib/supabase/admin'
 
+export const dynamic = 'force-dynamic'
+
 export default async function CustomerPricingPage({ params }: { params: Promise<{ id: string }> }) {
   const user = await requirePricingAdmin()
   const { id } = await params

@@ -6,7 +6,7 @@ import { redirect } from 'next/navigation'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { requireAdmin, requirePricingAdmin } from '@/lib/auth/session'
 import { applicationStatuses } from '@/lib/data/status'
-import { getResend, mailFrom } from '@/lib/mail/resend'
+import { sendSmtpMail } from '@/lib/mail/smtp'
 
 export type ActionState = { ok: boolean; message: string }
 
@@ -181,20 +181,18 @@ export async function sendPortalInviteAction(_prev: ActionState, formData: FormD
   const activateUrl = `${appUrl}/activate?token=${token}`
   const subject = 'Aktivera ditt konto i Div3rsa Portal'
   const html = `<p>Hej ${customer.contact_name || ''},</p><p>Ditt konto i Div3rsa Portal är skapat.</p><p><a href="${activateUrl}">Aktivera konto</a></p><p>Länken gäller i 48 timmar.</p><p>Vänliga hälsningar,<br/>Div3rsa</p>`
-  const resend = getResend()
-  let emailStatus = 'skipped'
+  const text = `Hej ${customer.contact_name || ''},\n\nDitt konto i Div3rsa Portal är skapat. Aktivera kontot här: ${activateUrl}\n\nLänken gäller i 48 timmar.\n\nDiv3rsa`
+  let emailStatus = 'sent'
   let errorMessage: string | null = null
   let providerMessageId: string | null = null
 
-  if (resend) {
-    const result = await resend.emails.send({ from: mailFrom(), to: customer.email, subject, html })
-    if (result.error) {
-      emailStatus = 'failed'
-      errorMessage = result.error.message
-    } else {
-      emailStatus = 'sent'
-      providerMessageId = result.data?.id ?? null
-    }
+  try {
+    const result = await sendSmtpMail({ to: customer.email, subject, html, text })
+    providerMessageId = typeof result.messageId === 'string' ? result.messageId : null
+  } catch (error) {
+    console.error('Portal invite SMTP error', error)
+    emailStatus = 'failed'
+    errorMessage = error instanceof Error ? error.message : 'Okänt SMTP-fel.'
   }
 
   await supabase.from('email_logs').insert({ customer_id: customerId, email_type: 'portal_invite', recipient: customer.email, subject, status: emailStatus, provider_message_id: providerMessageId, error_message: errorMessage, sent_at: emailStatus === 'sent' ? new Date().toISOString() : null })

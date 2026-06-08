@@ -4,6 +4,8 @@ import { requireUser } from '@/lib/auth/session'
 
 const steps = ['Ansökan mottagen', 'Ansökan granskad', 'Prisprofil satt', 'Partner-onboarding startad', 'Portal skapad', 'Konto aktiverat', 'Betalflöde under uppsättning', 'Aktiv kund']
 
+export const dynamic = 'force-dynamic'
+
 export default async function OnboardingPage() {
   const user = await requireUser()
   return (

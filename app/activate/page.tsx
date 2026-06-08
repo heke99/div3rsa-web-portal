@@ -1,6 +1,8 @@
 import Link from 'next/link'
 import { ActivateForm } from '@/components/auth/ActivateForm'
 
+export const dynamic = 'force-dynamic'
+
 export default async function ActivatePage({ searchParams }: { searchParams?: Promise<Record<string, string | string[] | undefined>> }) {
   const params = await searchParams
   const token = typeof params?.token === 'string' ? params.token : ''
