@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { PortalLayout } from '@/components/layout/PortalLayout'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { AdminResendInvoiceButton } from '@/components/invoices/InvoiceActions'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { requireAdmin } from '@/lib/auth/session'
 import { buildInvoiceHtml } from '@/lib/invoices'
@@ -16,14 +17,15 @@ export default async function AdminInvoiceDetailPage({ params }: { params: Promi
   const supabase = createAdminClient()
   const { data: invoice } = await supabase.from('invoices').select('*, payment_customers(*)').eq('id', id).maybeSingle()
   if (!invoice) notFound()
-  const [{ data: recipient }, { data: items }, { data: events }, { data: emails }] = await Promise.all([
+  const [{ data: recipient }, { data: items }, { data: events }, { data: emails }, { data: settings }] = await Promise.all([
     supabase.from('invoice_customers').select('*').eq('id', invoice.invoice_customer_id).maybeSingle(),
     supabase.from('invoice_items').select('*').eq('invoice_id', id).order('sort_order'),
     supabase.from('invoice_events').select('*').eq('invoice_id', id).order('created_at', { ascending: false }),
     supabase.from('invoice_email_logs').select('*').eq('invoice_id', id).order('created_at', { ascending: false }),
+    supabase.from('invoice_settings').select('*').eq('payment_customer_id', invoice.payment_customer_id).maybeSingle(),
   ])
   if (!recipient) notFound()
-  const html = buildInvoiceHtml({ invoice, customer: invoice.payment_customers, recipient, items: items ?? [] })
+  const html = buildInvoiceHtml({ invoice, customer: invoice.payment_customers, recipient, items: items ?? [], settings })
 
   return (
     <PortalLayout user={user}>
@@ -44,6 +46,7 @@ export default async function AdminInvoiceDetailPage({ params }: { params: Promi
           <section className="card p-5"><iframe className="h-[760px] w-full rounded-2xl border border-line bg-white" srcDoc={html} title="Faktura" /></section>
         </div>
         <aside className="space-y-5">
+          <section className="card p-5"><h2 className="text-lg font-black text-ink">Mailåtgärder</h2><div className="mt-3"><AdminResendInvoiceButton invoiceId={invoice.id} /></div></section>
           <section className="card p-5"><h2 className="text-lg font-black text-ink">Händelser</h2><div className="mt-3 space-y-3">{(events ?? []).map((event: any) => <div key={event.id} className="rounded-2xl border border-line bg-soft p-3 text-sm"><div className="font-bold text-ink">{event.event_type}</div><div>{event.description}</div><div className="text-xs text-muted">{formatDate(event.created_at)}</div></div>)}</div></section>
           <section className="card p-5"><h2 className="text-lg font-black text-ink">Mail-logg</h2><div className="mt-3 space-y-3">{(emails ?? []).map((email: any) => <div key={email.id} className="rounded-2xl border border-line bg-soft p-3 text-sm"><div className="font-bold text-ink">{email.status}</div><div className="text-muted">{email.recipient}</div><div className="text-xs text-muted">{formatDate(email.created_at)}</div>{email.error_message ? <div className="mt-1 text-xs text-rose-700">{email.error_message}</div> : null}</div>)}</div></section>
         </aside>

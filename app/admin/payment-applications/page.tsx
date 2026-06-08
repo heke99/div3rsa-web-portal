@@ -13,6 +13,7 @@ export default async function PaymentApplicationsPage({ searchParams }: { search
   const params = await searchParams
   const q = typeof params?.q === 'string' ? params.q.trim() : ''
   const status = typeof params?.status === 'string' ? params.status : ''
+  const view = typeof params?.view === 'string' ? params.view : 'active'
   const supabase = createAdminClient()
 
   let query = supabase
@@ -21,6 +22,10 @@ export default async function PaymentApplicationsPage({ searchParams }: { search
     .order('created_at', { ascending: false })
     .limit(100)
 
+  if (view === 'archived') query = query.not('archived_at', 'is', null).is('deleted_at', null)
+  else if (view === 'deleted') query = query.not('deleted_at', 'is', null)
+  else query = query.is('archived_at', null).is('deleted_at', null)
+
   if (status) query = query.eq('status', status)
   if (q) query = query.or(`company_name.ilike.%${q}%,org_number.ilike.%${q}%,email.ilike.%${q}%`)
 
@@ -28,8 +33,8 @@ export default async function PaymentApplicationsPage({ searchParams }: { search
 
   return (
     <PortalLayout user={user}>
-      <PageHeader title="Ansökningar" eyebrow="Företagsbetalningar & Bankgiro" description="Här ser du ansökningar som kommer från div3rsa.com." />
-      <form className="card mb-5 grid gap-3 p-4 md:grid-cols-[1fr_220px_auto]">
+      <PageHeader title="Ansökningar" eyebrow="Företagsbetalningar & Bankgiro" description="Här ser du ansökningar som kommer från div3rsa.com. Arkiverade och raderade ansökningar visas bara via filter." />
+      <form className="card mb-5 grid gap-3 p-4 md:grid-cols-[1fr_190px_190px_auto]">
         <input className="input" name="q" defaultValue={q} placeholder="Sök bolag, orgnummer eller e-post" />
         <select className="input" name="status" defaultValue={status}>
           <option value="">Alla statusar</option>
@@ -39,6 +44,12 @@ export default async function PaymentApplicationsPage({ searchParams }: { search
           <option value="qualified">Kvalificerad</option>
           <option value="approved">Godkänd</option>
           <option value="rejected">Avslagen</option>
+          <option value="customer_created">Kund skapad</option>
+        </select>
+        <select className="input" name="view" defaultValue={view}>
+          <option value="active">Aktiva</option>
+          <option value="archived">Arkiverade</option>
+          <option value="deleted">Raderade</option>
         </select>
         <button className="btn btn-primary">Filtrera</button>
       </form>
@@ -51,7 +62,7 @@ export default async function PaymentApplicationsPage({ searchParams }: { search
                 <td><div className="font-bold">{app.company_name}</div><div className="text-sm text-muted">{app.org_number}</div></td>
                 <td><div>{app.contact_name}</div><div className="text-sm text-muted">{app.email}</div></td>
                 <td><div>{app.monthly_volume_estimate || '—'}</div><div className="text-sm text-muted">{app.invoice_count_estimate || '—'} fakturor/mån</div></td>
-                <td><StatusBadge value={app.status} /></td>
+                <td><div className="flex flex-wrap gap-2"><StatusBadge value={app.status} />{app.archived_at ? <StatusBadge value="archived" /> : null}{app.deleted_at ? <StatusBadge value="deleted" /> : null}</div></td>
                 <td><span className="text-sm text-muted">{app.admin_notification_status || '—'}</span></td>
                 <td>{formatDate(app.created_at)}</td>
                 <td><Link className="font-bold text-brand" href={`/admin/payment-applications/${app.id}`}>Öppna</Link></td>

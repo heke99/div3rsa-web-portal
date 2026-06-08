@@ -8,6 +8,10 @@ export type InvoiceLineInput = {
   unit_price: number
   vat_rate: number
   sort_order?: number
+  product_id?: string | null
+  product_name_snapshot?: string | null
+  sku_snapshot?: string | null
+  unit?: string | null
 }
 
 export function calculateInvoiceTotals(lines: InvoiceLineInput[]) {
@@ -20,10 +24,21 @@ function roundMoney(value: number) {
   return Math.round((value + Number.EPSILON) * 100) / 100
 }
 
+export async function getInvoiceSettings(paymentCustomerId: string) {
+  const supabase = createAdminClient()
+  const { data } = await supabase
+    .from('invoice_settings')
+    .select('*')
+    .eq('payment_customer_id', paymentCustomerId)
+    .maybeSingle()
+  return data
+}
+
 export async function getNextInvoiceNumber(paymentCustomerId: string, issueDate: string) {
   const supabase = createAdminClient()
   const year = new Date(issueDate).getFullYear()
-  const prefix = `${year}-`
+  const settings = await getInvoiceSettings(paymentCustomerId)
+  const prefix = settings?.invoice_prefix || `${year}-`
   const { data: current } = await supabase
     .from('invoice_number_sequences')
     .select('*')
@@ -33,12 +48,12 @@ export async function getNextInvoiceNumber(paymentCustomerId: string, issueDate:
 
   if (current?.id) {
     const nextNumber = Number(current.next_number || 1)
-    await supabase.from('invoice_number_sequences').update({ next_number: nextNumber + 1, updated_at: new Date().toISOString() }).eq('id', current.id)
+    await supabase.from('invoice_number_sequences').update({ next_number: nextNumber + 1, prefix: current.prefix || prefix, updated_at: new Date().toISOString() }).eq('id', current.id)
     return `${current.prefix || prefix}${String(nextNumber).padStart(4, '0')}`
   }
 
   await supabase.from('invoice_number_sequences').insert({ payment_customer_id: paymentCustomerId, year, prefix, next_number: 2 })
-  return `${prefix}0001`
+  return `${prefix}${String(1).padStart(4, '0')}`
 }
 
 export async function resolveAccountingSyncStatus(paymentCustomerId: string) {
@@ -60,71 +75,114 @@ export async function resolveAccountingSyncStatus(paymentCustomerId: string) {
   return 'queued'
 }
 
+export function invoiceItemRows(invoiceId: string, lines: InvoiceLineInput[]) {
+  return lines.map((line) => ({
+    invoice_id: invoiceId,
+    product_id: line.product_id || null,
+    product_name_snapshot: line.product_name_snapshot || null,
+    sku_snapshot: line.sku_snapshot || null,
+    unit: line.unit || 'st',
+    description: line.description,
+    quantity: line.quantity,
+    unit_price: line.unit_price,
+    vat_rate: line.vat_rate,
+    line_total: roundMoney(line.quantity * line.unit_price),
+    sort_order: line.sort_order ?? 0,
+  }))
+}
+
 export function buildInvoiceHtml(input: {
   invoice: any
   customer: any
   recipient: any
   items: any[]
+  settings?: any
 }) {
   const { invoice, customer, recipient, items } = input
+  const settings = input.settings || {}
+  const sellerName = settings.seller_name || customer.company_name || 'Div3rsa kund'
+  const sellerOrg = settings.seller_org_number || customer.org_number || ''
+  const sellerEmail = settings.seller_email || customer.email || ''
+  const sellerAddress = [settings.seller_address_line_1, settings.seller_address_line_2, `${settings.seller_postal_code || ''} ${settings.seller_city || ''}`.trim(), settings.seller_country].filter(Boolean).join('<br>')
+  const paymentRows = [
+    settings.bankgiro ? `Bankgiro: ${escapeHtml(settings.bankgiro)}` : '',
+    settings.plusgiro ? `Plusgiro: ${escapeHtml(settings.plusgiro)}` : '',
+    settings.iban ? `IBAN: ${escapeHtml(settings.iban)}` : '',
+    settings.bank_account ? `Bankkonto: ${escapeHtml(settings.bank_account)}` : '',
+  ].filter(Boolean).join('<br>')
+  const paymentWarning = paymentRows ? '' : '<div style="margin-top:16px;padding:12px;border:1px solid #fecaca;background:#fff1f2;color:#991b1b;border-radius:10px">Fakturan saknar betalningsuppgifter. Lägg till bankgiro eller bankkonto under Fakturainställningar.</div>'
+
   const rows = items.map((item) => `
     <tr>
-      <td>${escapeHtml(item.description)}</td>
-      <td style="text-align:right">${Number(item.quantity).toLocaleString('sv-SE')}</td>
-      <td style="text-align:right">${Number(item.unit_price).toLocaleString('sv-SE')} ${invoice.currency}</td>
-      <td style="text-align:right">${Number(item.vat_rate).toLocaleString('sv-SE')}%</td>
-      <td style="text-align:right">${Number(item.line_total).toLocaleString('sv-SE')} ${invoice.currency}</td>
+      <td style="padding:10px;border-bottom:1px solid #e2e8f0">
+        <strong>${escapeHtml(item.product_name_snapshot || item.description)}</strong>
+        ${item.sku_snapshot ? `<div style="font-size:12px;color:#64748b">SKU: ${escapeHtml(item.sku_snapshot)}</div>` : ''}
+        ${item.product_name_snapshot && item.description !== item.product_name_snapshot ? `<div style="font-size:12px;color:#64748b">${escapeHtml(item.description)}</div>` : ''}
+      </td>
+      <td style="text-align:right;padding:10px;border-bottom:1px solid #e2e8f0">${Number(item.quantity).toLocaleString('sv-SE')} ${escapeHtml(item.unit || '')}</td>
+      <td style="text-align:right;padding:10px;border-bottom:1px solid #e2e8f0">${Number(item.unit_price).toLocaleString('sv-SE')} ${escapeHtml(invoice.currency)}</td>
+      <td style="text-align:right;padding:10px;border-bottom:1px solid #e2e8f0">${Number(item.vat_rate).toLocaleString('sv-SE')}%</td>
+      <td style="text-align:right;padding:10px;border-bottom:1px solid #e2e8f0">${Number(item.line_total).toLocaleString('sv-SE')} ${escapeHtml(invoice.currency)}</td>
     </tr>
   `).join('')
 
   return `<!doctype html>
 <html lang="sv">
 <head><meta charset="utf-8"><title>Faktura ${escapeHtml(invoice.invoice_number || '')}</title></head>
-<body style="font-family:Arial,sans-serif;color:#0f172a;line-height:1.5">
-  <div style="max-width:820px;margin:0 auto;padding:32px">
-    <div style="display:flex;justify-content:space-between;gap:24px">
+<body style="font-family:Arial,sans-serif;color:#0f172a;line-height:1.5;background:#fff">
+  <div style="max-width:860px;margin:0 auto;padding:32px">
+    <div style="display:flex;justify-content:space-between;gap:24px;align-items:flex-start">
       <div>
-        <h1 style="margin:0 0 8px;font-size:32px">Faktura</h1>
+        ${settings.logo_url ? `<img src="${escapeHtml(settings.logo_url)}" alt="Logga" style="max-height:54px;max-width:180px;margin-bottom:16px">` : ''}
+        <h1 style="margin:0 0 8px;font-size:34px">Faktura</h1>
         <p style="margin:0;color:#64748b">${escapeHtml(invoice.invoice_number || 'Utkast')}</p>
       </div>
       <div style="text-align:right">
-        <strong>${escapeHtml(customer.company_name || 'Div3rsa kund')}</strong><br>
-        ${escapeHtml(customer.org_number || '')}<br>
-        ${escapeHtml(customer.email || '')}
+        <strong>${escapeHtml(sellerName)}</strong><br>
+        ${escapeHtml(sellerOrg)}<br>
+        ${sellerAddress}<br>
+        ${escapeHtml(sellerEmail)}
       </div>
     </div>
 
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-top:32px">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-top:34px">
       <div>
-        <h2 style="font-size:14px;text-transform:uppercase;color:#64748b">Faktureras till</h2>
+        <h2 style="font-size:13px;text-transform:uppercase;color:#64748b;letter-spacing:.08em">Faktureras till</h2>
         <strong>${escapeHtml(recipient.name)}</strong><br>
         ${escapeHtml(recipient.organization_number || '')}<br>
         ${escapeHtml(recipient.address_line_1 || '')}<br>
+        ${escapeHtml(recipient.address_line_2 || '')}<br>
         ${escapeHtml(`${recipient.postal_code || ''} ${recipient.city || ''}`.trim())}<br>
         ${escapeHtml(recipient.email || '')}
       </div>
       <div>
-        <h2 style="font-size:14px;text-transform:uppercase;color:#64748b">Detaljer</h2>
+        <h2 style="font-size:13px;text-transform:uppercase;color:#64748b;letter-spacing:.08em">Detaljer</h2>
         Fakturadatum: ${escapeHtml(invoice.issue_date || '')}<br>
         Förfallodatum: ${escapeHtml(invoice.due_date || '')}<br>
-        Valuta: ${escapeHtml(invoice.currency || 'SEK')}
+        Valuta: ${escapeHtml(invoice.currency || 'SEK')}<br>
+        Betalningsvillkor: ${escapeHtml(settings.default_payment_terms_days ? `${settings.default_payment_terms_days} dagar` : 'enligt avtal')}
       </div>
     </div>
 
     <table style="width:100%;border-collapse:collapse;margin-top:32px">
       <thead>
-        <tr style="background:#f8fafc"><th style="text-align:left;padding:10px;border-bottom:1px solid #e2e8f0">Beskrivning</th><th style="text-align:right;padding:10px;border-bottom:1px solid #e2e8f0">Antal</th><th style="text-align:right;padding:10px;border-bottom:1px solid #e2e8f0">Pris</th><th style="text-align:right;padding:10px;border-bottom:1px solid #e2e8f0">Moms</th><th style="text-align:right;padding:10px;border-bottom:1px solid #e2e8f0">Summa</th></tr>
+        <tr style="background:#f8fafc"><th style="text-align:left;padding:10px;border-bottom:1px solid #e2e8f0">Artikel</th><th style="text-align:right;padding:10px;border-bottom:1px solid #e2e8f0">Antal</th><th style="text-align:right;padding:10px;border-bottom:1px solid #e2e8f0">Pris</th><th style="text-align:right;padding:10px;border-bottom:1px solid #e2e8f0">Moms</th><th style="text-align:right;padding:10px;border-bottom:1px solid #e2e8f0">Summa</th></tr>
       </thead>
       <tbody>${rows}</tbody>
     </table>
 
-    <div style="margin-top:24px;margin-left:auto;max-width:320px">
-      <div style="display:flex;justify-content:space-between"><span>Exkl. moms</span><strong>${Number(invoice.subtotal_amount).toLocaleString('sv-SE')} ${invoice.currency}</strong></div>
-      <div style="display:flex;justify-content:space-between"><span>Moms</span><strong>${Number(invoice.vat_amount).toLocaleString('sv-SE')} ${invoice.currency}</strong></div>
-      <div style="display:flex;justify-content:space-between;font-size:20px;margin-top:10px;border-top:1px solid #e2e8f0;padding-top:10px"><span>Att betala</span><strong>${Number(invoice.total_amount).toLocaleString('sv-SE')} ${invoice.currency}</strong></div>
+    <div style="margin-top:24px;margin-left:auto;max-width:340px">
+      <div style="display:flex;justify-content:space-between"><span>Exkl. moms</span><strong>${Number(invoice.subtotal_amount).toLocaleString('sv-SE')} ${escapeHtml(invoice.currency)}</strong></div>
+      <div style="display:flex;justify-content:space-between"><span>Moms</span><strong>${Number(invoice.vat_amount).toLocaleString('sv-SE')} ${escapeHtml(invoice.currency)}</strong></div>
+      <div style="display:flex;justify-content:space-between;font-size:20px;margin-top:10px;border-top:1px solid #e2e8f0;padding-top:10px"><span>Att betala</span><strong>${Number(invoice.total_amount).toLocaleString('sv-SE')} ${escapeHtml(invoice.currency)}</strong></div>
     </div>
 
-    <p style="margin-top:32px;color:#64748b">Betalningsinformation och villkor visas enligt bolagets inställningar. Kontakta avsändaren vid frågor.</p>
+    <div style="margin-top:32px;padding:16px;background:#f8fafc;border-radius:12px">
+      <strong>Betalningsinformation</strong><br>${paymentRows || 'Betalningsuppgifter saknas.'}
+    </div>
+    ${paymentWarning}
+    ${settings.invoice_terms_text ? `<p style="margin-top:24px;color:#334155">${escapeHtml(settings.invoice_terms_text)}</p>` : ''}
+    ${settings.invoice_footer_text ? `<p style="margin-top:24px;color:#64748b;font-size:12px">${escapeHtml(settings.invoice_footer_text)}</p>` : ''}
   </div>
 </body>
 </html>`

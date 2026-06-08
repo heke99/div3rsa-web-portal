@@ -3,13 +3,17 @@
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { requireUser } from '@/lib/auth/session'
+import { requireAdmin, requireUser } from '@/lib/auth/session'
 import { sendSmtpMail } from '@/lib/mail/smtp'
-import { buildInvoiceHtml, calculateInvoiceTotals, getNextInvoiceNumber, resolveAccountingSyncStatus, type InvoiceLineInput } from '@/lib/invoices'
+import { buildInvoiceHtml, calculateInvoiceTotals, getInvoiceSettings, getNextInvoiceNumber, invoiceItemRows, resolveAccountingSyncStatus, type InvoiceLineInput } from '@/lib/invoices'
 import type { ActionState } from '@/lib/actions/applications'
 
 function str(formData: FormData, key: string) {
   return String(formData.get(key) || '').trim()
+}
+
+function bool(formData: FormData, key: string) {
+  return formData.get(key) === 'on' || formData.get(key) === 'true'
 }
 
 function num(value: FormDataEntryValue | null, fallback = 0) {
@@ -23,15 +27,77 @@ async function requireCustomerContext() {
   return { user, customerId: user.customer_id }
 }
 
-function parseLines(formData: FormData): InvoiceLineInput[] {
+async function buildLineFromForm(input: { formData: FormData; index: number; customerId: string; userId: string; supabase: ReturnType<typeof createAdminClient> }) {
+  const { formData, index, customerId, userId, supabase } = input
+  const productId = str(formData, `line_product_id_${index}`)
+  const customName = str(formData, `line_custom_name_${index}`)
+  const description = str(formData, `line_description_${index}`)
+  const sku = str(formData, `line_sku_${index}`) || null
+  const unit = str(formData, `line_unit_${index}`) || 'st'
+  const quantity = num(formData.get(`line_quantity_${index}`), 1)
+  const unitPrice = num(formData.get(`line_unit_price_${index}`), 0)
+  const vatRate = num(formData.get(`line_vat_rate_${index}`), 25)
+  const saveProduct = bool(formData, `line_save_product_${index}`)
+
+  if (productId) {
+    const { data: product } = await supabase
+      .from('invoice_products')
+      .select('*')
+      .eq('id', productId)
+      .eq('payment_customer_id', customerId)
+      .maybeSingle()
+    if (!product) return null
+    return {
+      description: description || product.description || product.name,
+      quantity,
+      unit_price: unitPrice || Number(product.unit_price || 0),
+      vat_rate: Number.isFinite(vatRate) ? vatRate : Number(product.vat_rate ?? 25),
+      sort_order: index,
+      product_id: product.id,
+      product_name_snapshot: product.name,
+      sku_snapshot: product.sku || null,
+      unit: unit || product.unit || 'st',
+    } as InvoiceLineInput
+  }
+
+  const lineName = customName || description
+  if (!lineName) return null
+  let createdProductId: string | null = null
+  if (saveProduct) {
+    const { data: createdProduct } = await supabase.from('invoice_products').insert({
+      payment_customer_id: customerId,
+      name: customName || description,
+      description,
+      sku,
+      unit,
+      unit_price: unitPrice,
+      vat_rate: vatRate,
+      currency: str(formData, 'currency') || 'SEK',
+      is_active: true,
+      created_by: userId,
+    }).select('id').single()
+    createdProductId = createdProduct?.id || null
+  }
+
+  return {
+    description: description || lineName,
+    quantity,
+    unit_price: unitPrice,
+    vat_rate: vatRate,
+    sort_order: index,
+    product_id: createdProductId,
+    product_name_snapshot: lineName,
+    sku_snapshot: sku,
+    unit,
+  } as InvoiceLineInput
+}
+
+async function parseLines(formData: FormData, customerId: string, userId: string): Promise<InvoiceLineInput[]> {
+  const supabase = createAdminClient()
   const lines: InvoiceLineInput[] = []
   for (let index = 0; index < 8; index += 1) {
-    const description = str(formData, `line_description_${index}`)
-    if (!description) continue
-    const quantity = num(formData.get(`line_quantity_${index}`), 1)
-    const unit_price = num(formData.get(`line_unit_price_${index}`), 0)
-    const vat_rate = num(formData.get(`line_vat_rate_${index}`), 25)
-    lines.push({ description, quantity, unit_price, vat_rate, sort_order: index })
+    const line = await buildLineFromForm({ formData, index, customerId, userId, supabase })
+    if (line) lines.push(line)
   }
   return lines
 }
@@ -42,7 +108,7 @@ export async function saveInvoiceDraftAction(_prev: ActionState, formData: FormD
   const issueDate = str(formData, 'issue_date') || new Date().toISOString().slice(0, 10)
   const dueDate = str(formData, 'due_date')
   const currency = str(formData, 'currency') || 'SEK'
-  const lines = parseLines(formData)
+  const lines = await parseLines(formData, customerId, user.id)
 
   if (!invoiceCustomerId) return { ok: false, message: 'Välj fakturamottagare.' }
   if (!dueDate) return { ok: false, message: 'Ange förfallodatum.' }
@@ -66,6 +132,7 @@ export async function saveInvoiceDraftAction(_prev: ActionState, formData: FormD
       status: 'draft',
       accounting_sync_status: 'not_enabled',
       source: 'portal',
+      invoice_type: 'invoice',
       issue_date: issueDate,
       due_date: dueDate,
       currency,
@@ -77,45 +144,40 @@ export async function saveInvoiceDraftAction(_prev: ActionState, formData: FormD
 
   if (error || !invoice) return { ok: false, message: 'Kunde inte skapa fakturan.' }
 
-  const itemRows = lines.map((line) => ({
-    invoice_id: invoice.id,
-    description: line.description,
-    quantity: line.quantity,
-    unit_price: line.unit_price,
-    vat_rate: line.vat_rate,
-    line_total: line.quantity * line.unit_price,
-    sort_order: line.sort_order ?? 0,
-  }))
-  await supabase.from('invoice_items').insert(itemRows)
-  await supabase.from('invoice_events').insert({ invoice_id: invoice.id, payment_customer_id: customerId, actor_user_id: user.id, actor_role: user.role, event_type: 'created', description: 'Faktura skapades som utkast.' })
+  await supabase.from('invoice_items').insert(invoiceItemRows(invoice.id, lines))
+  await supabase.from('invoice_events').insert({ invoice_id: invoice.id, payment_customer_id: customerId, actor_user_id: user.id, actor_role: user.role, event_type: 'invoice_created', description: 'Faktura skapades som utkast.', metadata: { line_count: lines.length } })
+  if (lines.some((line) => line.product_id)) {
+    await supabase.from('invoice_events').insert({ invoice_id: invoice.id, payment_customer_id: customerId, actor_user_id: user.id, actor_role: user.role, event_type: 'product_added', description: 'En eller flera artiklar kopplades till fakturan.' })
+  }
 
   revalidatePath('/invoices')
   redirect(`/invoices/${invoice.id}`)
 }
 
-export async function sendInvoiceAction(_prev: ActionState, formData: FormData): Promise<ActionState> {
-  const { user, customerId } = await requireCustomerContext()
-  const invoiceId = str(formData, 'invoice_id')
-  if (!invoiceId) return { ok: false, message: 'Faktura saknas.' }
-
+async function sendInvoiceById(input: { invoiceId: string; customerId?: string; actorUserId?: string | null; actorRole?: string | null; adminMode?: boolean }) {
+  const { invoiceId, customerId, actorUserId, actorRole, adminMode } = input
   const supabase = createAdminClient()
-  const [{ data: invoice }, { data: customer }] = await Promise.all([
-    supabase.from('invoices').select('*').eq('id', invoiceId).eq('payment_customer_id', customerId).maybeSingle(),
-    supabase.from('payment_customers').select('*').eq('id', customerId).maybeSingle(),
-  ])
-  if (!invoice || !customer) return { ok: false, message: 'Fakturan hittades inte.' }
+  const invoiceQuery = supabase.from('invoices').select('*').eq('id', invoiceId)
+  if (!adminMode && customerId) invoiceQuery.eq('payment_customer_id', customerId)
+  const { data: invoice } = await invoiceQuery.maybeSingle()
+  if (!invoice) return { ok: false, message: 'Fakturan hittades inte.' }
 
-  const [{ data: recipient }, { data: items }] = await Promise.all([
-    supabase.from('invoice_customers').select('*').eq('id', invoice.invoice_customer_id).eq('payment_customer_id', customerId).maybeSingle(),
+  const effectiveCustomerId = invoice.payment_customer_id
+  const [{ data: customer }, { data: recipient }, { data: items }, { data: settings }] = await Promise.all([
+    supabase.from('payment_customers').select('*').eq('id', effectiveCustomerId).maybeSingle(),
+    supabase.from('invoice_customers').select('*').eq('id', invoice.invoice_customer_id).eq('payment_customer_id', effectiveCustomerId).maybeSingle(),
     supabase.from('invoice_items').select('*').eq('invoice_id', invoiceId).order('sort_order'),
+    supabase.from('invoice_settings').select('*').eq('payment_customer_id', effectiveCustomerId).maybeSingle(),
   ])
-  if (!recipient?.email) return { ok: false, message: 'Fakturamottagaren saknar e-post.' }
+  if (!customer || !recipient) return { ok: false, message: 'Fakturan saknar kund eller mottagare.' }
+  if (!recipient.email) return { ok: false, message: 'Fakturamottagaren saknar e-post.' }
 
-  const invoiceNumber = invoice.invoice_number || await getNextInvoiceNumber(customerId, invoice.issue_date)
-  const accountingSyncStatus = await resolveAccountingSyncStatus(customerId)
+  const alreadySent = Boolean(invoice.sent_at || invoice.invoice_number)
+  const invoiceNumber = invoice.invoice_number || await getNextInvoiceNumber(effectiveCustomerId, invoice.issue_date)
+  const accountingSyncStatus = await resolveAccountingSyncStatus(effectiveCustomerId)
   const invoiceForHtml = { ...invoice, invoice_number: invoiceNumber }
-  const html = buildInvoiceHtml({ invoice: invoiceForHtml, customer, recipient, items: items ?? [] })
-  const subject = `Faktura ${invoiceNumber} från ${customer.company_name}`
+  const html = buildInvoiceHtml({ invoice: invoiceForHtml, customer, recipient, items: items ?? [], settings })
+  const subject = `Faktura ${invoiceNumber} från ${settings?.seller_name || customer.company_name}`
   let emailStatus = 'sent'
   let errorMessage: string | null = null
   let providerMessageId: string | null = null
@@ -125,8 +187,8 @@ export async function sendInvoiceAction(_prev: ActionState, formData: FormData):
       to: recipient.email,
       subject,
       html,
-      text: `Hej,\n\nHär kommer faktura ${invoiceNumber} från ${customer.company_name}. Belopp: ${invoice.total_amount} ${invoice.currency}.\n\nVänliga hälsningar,\n${customer.company_name}`,
-      replyTo: customer.email,
+      text: `Hej,\n\nHär kommer faktura ${invoiceNumber} från ${settings?.seller_name || customer.company_name}. Belopp: ${invoice.total_amount} ${invoice.currency}.\n\nVänliga hälsningar,\n${settings?.seller_name || customer.company_name}`,
+      replyTo: settings?.seller_email || customer.email,
     })
     providerMessageId = typeof result.messageId === 'string' ? result.messageId : null
   } catch (error) {
@@ -135,32 +197,56 @@ export async function sendInvoiceAction(_prev: ActionState, formData: FormData):
     errorMessage = error instanceof Error ? error.message : 'Okänt SMTP-fel.'
   }
 
-  await supabase.from('invoice_email_logs').insert({ invoice_id: invoiceId, payment_customer_id: customerId, recipient: recipient.email, subject, status: emailStatus, provider_message_id: providerMessageId, error_message: errorMessage, sent_at: emailStatus === 'sent' ? new Date().toISOString() : null })
+  const { data: emailLog } = await supabase.from('invoice_email_logs').insert({ invoice_id: invoiceId, payment_customer_id: effectiveCustomerId, recipient: recipient.email, subject, status: emailStatus, provider_message_id: providerMessageId, error_message: errorMessage, sent_at: emailStatus === 'sent' ? new Date().toISOString() : null }).select('id').single()
 
-  await supabase.from('invoices').update({
+  const updatePayload: Record<string, any> = {
     invoice_number: invoiceNumber,
-    status: emailStatus === 'sent' ? 'sent' : 'failed',
-    accounting_sync_status: emailStatus === 'sent' ? accountingSyncStatus : invoice.accounting_sync_status,
-    sent_at: emailStatus === 'sent' ? new Date().toISOString() : invoice.sent_at,
     updated_at: new Date().toISOString(),
-  }).eq('id', invoiceId).eq('payment_customer_id', customerId)
+  }
+  if (emailStatus === 'sent') {
+    updatePayload.accounting_sync_status = accountingSyncStatus
+    updatePayload.sent_at = invoice.sent_at || new Date().toISOString()
+    if (!['paid', 'overdue', 'cancelled', 'credited'].includes(invoice.status)) updatePayload.status = 'sent'
+  } else if (!alreadySent) {
+    updatePayload.status = 'failed'
+  }
+  await supabase.from('invoices').update(updatePayload).eq('id', invoiceId).eq('payment_customer_id', effectiveCustomerId)
 
   await supabase.from('invoice_events').insert({
     invoice_id: invoiceId,
-    payment_customer_id: customerId,
-    actor_user_id: user.id,
-    actor_role: user.role,
-    event_type: emailStatus === 'sent' ? 'sent' : 'email_failed',
-    description: emailStatus === 'sent' ? 'Fakturan skickades via SMTP.' : `Mail kunde inte skickas: ${errorMessage}`,
+    payment_customer_id: effectiveCustomerId,
+    actor_user_id: actorUserId || null,
+    actor_role: actorRole || null,
+    event_type: emailStatus === 'sent' ? (alreadySent ? 'invoice_resent' : 'invoice_sent') : 'invoice_email_failed',
+    description: emailStatus === 'sent' ? (alreadySent ? 'Fakturan skickades om via SMTP.' : 'Fakturan skickades via SMTP.') : `Mail kunde inte skickas: ${errorMessage}`,
+    metadata: { email_log_id: emailLog?.id || null },
   })
 
-  if (emailStatus === 'sent' && accountingSyncStatus === 'queued') {
-    await supabase.from('accounting_sync_jobs').insert({ payment_customer_id: customerId, invoice_id: invoiceId, provider: 'internal', status: 'queued' })
+  if (emailStatus === 'sent' && accountingSyncStatus === 'queued' && !alreadySent) {
+    await supabase.from('accounting_sync_jobs').insert({ payment_customer_id: effectiveCustomerId, invoice_id: invoiceId, provider: 'internal', status: 'queued' })
   }
 
+  return { ok: emailStatus === 'sent', message: emailStatus === 'sent' ? (alreadySent ? 'Fakturan skickades om.' : 'Fakturan skickades.') : 'Fakturan sparades, men mail kunde inte skickas.' }
+}
+
+export async function sendInvoiceAction(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const { user, customerId } = await requireCustomerContext()
+  const invoiceId = str(formData, 'invoice_id')
+  if (!invoiceId) return { ok: false, message: 'Faktura saknas.' }
+  const result = await sendInvoiceById({ invoiceId, customerId, actorUserId: user.id, actorRole: user.role })
   revalidatePath('/invoices')
   revalidatePath(`/invoices/${invoiceId}`)
-  return { ok: emailStatus === 'sent', message: emailStatus === 'sent' ? 'Fakturan skickades.' : 'Fakturan sparades, men mail kunde inte skickas.' }
+  return result
+}
+
+export async function adminResendInvoiceAction(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const user = await requireAdmin()
+  const invoiceId = str(formData, 'invoice_id')
+  if (!invoiceId) return { ok: false, message: 'Faktura saknas.' }
+  const result = await sendInvoiceById({ invoiceId, actorUserId: user.id, actorRole: user.role, adminMode: true })
+  revalidatePath('/admin/invoices')
+  revalidatePath(`/admin/invoices/${invoiceId}`)
+  return result
 }
 
 export async function markInvoicePaidAction(_prev: ActionState, formData: FormData): Promise<ActionState> {
@@ -177,7 +263,7 @@ export async function markInvoicePaidAction(_prev: ActionState, formData: FormDa
 
   await supabase.from('invoice_payments').insert({ invoice_id: invoiceId, payment_customer_id: customerId, amount, paid_at: paidAt, reference, method: 'manual', created_by: user.id })
   await supabase.from('invoices').update({ status: 'paid', paid_at: paidAt, updated_at: new Date().toISOString() }).eq('id', invoiceId)
-  await supabase.from('invoice_events').insert({ invoice_id: invoiceId, payment_customer_id: customerId, actor_user_id: user.id, actor_role: user.role, event_type: 'paid', description: 'Fakturan markerades som betald manuellt.' })
+  await supabase.from('invoice_events').insert({ invoice_id: invoiceId, payment_customer_id: customerId, actor_user_id: user.id, actor_role: user.role, event_type: 'invoice_marked_paid', description: 'Fakturan markerades som betald manuellt.', metadata: { amount } })
   revalidatePath('/invoices')
   revalidatePath(`/invoices/${invoiceId}`)
   return { ok: true, message: 'Fakturan markerades som betald.' }

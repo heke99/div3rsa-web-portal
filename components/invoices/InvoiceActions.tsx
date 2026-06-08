@@ -1,17 +1,28 @@
 'use client'
 
 import { useActionState } from 'react'
-import { markInvoicePaidAction, sendInvoiceAction } from '@/lib/actions/invoices'
+import { adminResendInvoiceAction, markInvoicePaidAction, sendInvoiceAction } from '@/lib/actions/invoices'
 import type { ActionState } from '@/lib/actions/applications'
 
 const initialState: ActionState = { ok: false, message: '' }
 
-export function SendInvoiceButton({ invoiceId, disabled }: { invoiceId: string; disabled?: boolean }) {
+export function SendInvoiceButton({ invoiceId, disabled, resent }: { invoiceId: string; disabled?: boolean; resent?: boolean }) {
   const [state, action, pending] = useActionState(sendInvoiceAction, initialState)
   return (
     <form action={action} className="space-y-2">
       <input type="hidden" name="invoice_id" value={invoiceId} />
-      <button className="btn btn-primary w-full" disabled={pending || disabled}>{pending ? 'Skickar…' : 'Skicka faktura'}</button>
+      <button className="btn btn-primary w-full" disabled={pending || disabled}>{pending ? 'Skickar…' : resent ? 'Skicka om faktura' : 'Skicka faktura'}</button>
+      {state.message ? <p className={`text-sm font-semibold ${state.ok ? 'text-emerald-700' : 'text-rose-700'}`}>{state.message}</p> : null}
+    </form>
+  )
+}
+
+export function AdminResendInvoiceButton({ invoiceId }: { invoiceId: string }) {
+  const [state, action, pending] = useActionState(adminResendInvoiceAction, initialState)
+  return (
+    <form action={action} className="space-y-2">
+      <input type="hidden" name="invoice_id" value={invoiceId} />
+      <button className="btn btn-primary w-full" disabled={pending}>{pending ? 'Skickar…' : 'Skicka om faktura'}</button>
       {state.message ? <p className={`text-sm font-semibold ${state.ok ? 'text-emerald-700' : 'text-rose-700'}`}>{state.message}</p> : null}
     </form>
   )

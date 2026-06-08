@@ -21,14 +21,15 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
   ])
   if (!invoice || !customer) notFound()
 
-  const [{ data: recipient }, { data: items }, { data: events }, { data: emails }] = await Promise.all([
+  const [{ data: recipient }, { data: items }, { data: events }, { data: emails }, { data: settings }] = await Promise.all([
     supabase.from('invoice_customers').select('*').eq('id', invoice.invoice_customer_id).eq('payment_customer_id', user.customer_id).maybeSingle(),
     supabase.from('invoice_items').select('*').eq('invoice_id', id).order('sort_order'),
     supabase.from('invoice_events').select('*').eq('invoice_id', id).order('created_at', { ascending: false }),
     supabase.from('invoice_email_logs').select('*').eq('invoice_id', id).order('created_at', { ascending: false }),
+    supabase.from('invoice_settings').select('*').eq('payment_customer_id', user.customer_id).maybeSingle(),
   ])
   if (!recipient) notFound()
-  const html = buildInvoiceHtml({ invoice, customer, recipient, items: items ?? [] })
+  const html = buildInvoiceHtml({ invoice, customer, recipient, items: items ?? [], settings })
 
   return (
     <PortalLayout user={user}>
@@ -64,7 +65,7 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
           </section>
         </div>
         <aside className="space-y-5">
-          <section className="card p-5"><SendInvoiceButton invoiceId={invoice.id} disabled={invoice.status === 'paid'} /></section>
+          <section className="card p-5"><SendInvoiceButton invoiceId={invoice.id} disabled={invoice.status === 'paid'} resent={Boolean(invoice.sent_at || invoice.invoice_number)} /></section>
           <MarkInvoicePaidForm invoiceId={invoice.id} totalAmount={Number(invoice.total_amount || 0)} />
           <section className="card p-5">
             <h2 className="text-lg font-black text-ink">Mail-logg</h2>

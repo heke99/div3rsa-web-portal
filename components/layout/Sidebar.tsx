@@ -20,6 +20,7 @@ const customerLinks = [
   { href: '/invoices', label: 'Skickade fakturor' },
   { href: '/invoice-customers', label: 'Kunder' },
   { href: '/invoices/new', label: 'Ny faktura' },
+  { href: '/invoice-products', label: 'Artiklar' },
   { href: '/invoice-templates', label: 'Fakturamallar' },
   { href: '/recurring-invoices', label: 'Återkommande fakturor' },
   { href: '/api-webhooks', label: 'API & Webhooks' },

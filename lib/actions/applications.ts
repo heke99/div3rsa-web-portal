@@ -268,3 +268,50 @@ export async function disablePortalAccessAction(_prev: ActionState, formData: Fo
   revalidatePath(`/admin/payment-customers/${customerId}`)
   return { ok: true, message: 'Portalåtkomst inaktiverad.' }
 }
+
+export async function archiveApplicationAction(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const user = await requireAdmin()
+  const id = String(formData.get('application_id') || '')
+  if (!id) return { ok: false, message: 'Ansökan saknas.' }
+  const supabase = createAdminClient()
+  const now = new Date().toISOString()
+  const { error } = await supabase.from('payment_applications').update({ archived_at: now, archived_by: user.id, updated_at: now }).eq('id', id).is('deleted_at', null)
+  if (error) return { ok: false, message: 'Kunde inte arkivera ansökan.' }
+  await supabase.from('payment_application_events').insert({ application_id: id, event_type: 'archived', description: 'Ansökan arkiverades.', created_by: user.id })
+  await logAudit({ actorUserId: user.id, actorRole: user.role, entityType: 'payment_application', entityId: id, action: 'application_archived' })
+  revalidatePath('/admin/payment-applications')
+  revalidatePath(`/admin/payment-applications/${id}`)
+  return { ok: true, message: 'Ansökan arkiverades.' }
+}
+
+export async function restoreApplicationAction(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const user = await requireAdmin()
+  const id = String(formData.get('application_id') || '')
+  if (!id) return { ok: false, message: 'Ansökan saknas.' }
+  const supabase = createAdminClient()
+  const { error } = await supabase.from('payment_applications').update({ archived_at: null, archived_by: null, updated_at: new Date().toISOString() }).eq('id', id).is('deleted_at', null)
+  if (error) return { ok: false, message: 'Kunde inte återställa ansökan.' }
+  await supabase.from('payment_application_events').insert({ application_id: id, event_type: 'restored', description: 'Ansökan återställdes från arkiv.', created_by: user.id })
+  await logAudit({ actorUserId: user.id, actorRole: user.role, entityType: 'payment_application', entityId: id, action: 'application_restored' })
+  revalidatePath('/admin/payment-applications')
+  revalidatePath(`/admin/payment-applications/${id}`)
+  return { ok: true, message: 'Ansökan återställdes.' }
+}
+
+export async function deleteApplicationAction(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const user = await requirePricingAdmin()
+  if (user.role !== 'super_admin') return { ok: false, message: 'Endast superadmin kan radera ansökningar.' }
+  const id = String(formData.get('application_id') || '')
+  const reason = String(formData.get('delete_reason') || '').trim()
+  if (!id) return { ok: false, message: 'Ansökan saknas.' }
+  if (reason.length < 5) return { ok: false, message: 'Ange raderingsorsak.' }
+  const supabase = createAdminClient()
+  const now = new Date().toISOString()
+  const { error } = await supabase.from('payment_applications').update({ deleted_at: now, deleted_by: user.id, delete_reason: reason, updated_at: now }).eq('id', id)
+  if (error) return { ok: false, message: 'Kunde inte radera ansökan.' }
+  await supabase.from('payment_application_events').insert({ application_id: id, event_type: 'deleted', description: `Ansökan raderades: ${reason}`, created_by: user.id })
+  await logAudit({ actorUserId: user.id, actorRole: user.role, entityType: 'payment_application', entityId: id, action: 'application_deleted', newValues: { reason } })
+  revalidatePath('/admin/payment-applications')
+  revalidatePath(`/admin/payment-applications/${id}`)
+  return { ok: true, message: 'Ansökan raderades från standardvyer.' }
+}

@@ -3,7 +3,7 @@ import { notFound } from 'next/navigation'
 import { PortalLayout } from '@/components/layout/PortalLayout'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { StatusBadge } from '@/components/ui/StatusBadge'
-import { ApplicationNoteForm, ApplicationStatusForm } from '@/components/admin/ApplicationActions'
+import { ApplicationArchiveForm, ApplicationNoteForm, ApplicationStatusForm } from '@/components/admin/ApplicationActions'
 import { createCustomerFromApplicationAction } from '@/lib/actions/applications'
 import { requireAdmin } from '@/lib/auth/session'
 import { createAdminClient } from '@/lib/supabase/admin'
@@ -39,7 +39,7 @@ export default async function ApplicationDetailPage({ params }: { params: Promis
           <section className="card p-5">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <h2 className="text-xl font-black text-ink">Översikt</h2>
-              <StatusBadge value={app.status} />
+              <div className="flex flex-wrap gap-2"><StatusBadge value={app.status} />{app.archived_at ? <StatusBadge value="archived" /> : null}{app.deleted_at ? <StatusBadge value="deleted" /> : null}</div>
             </div>
             <div className="mt-5 grid gap-4 md:grid-cols-2">
               <Info label="Organisationsnummer" value={app.org_number} />
@@ -102,6 +102,7 @@ export default async function ApplicationDetailPage({ params }: { params: Promis
 
         <aside className="space-y-5">
           <ApplicationStatusForm applicationId={app.id} currentStatus={app.status} />
+          <ApplicationArchiveForm applicationId={app.id} archived={Boolean(app.archived_at)} deleted={Boolean(app.deleted_at)} isSuperAdmin={user.role === 'super_admin'} />
           <ApplicationNoteForm applicationId={app.id} />
           <Activity title="Interna anteckningar" items={notes ?? []} empty="Inga anteckningar ännu." field="note" />
           <Activity title="Eventlogg" items={events ?? []} empty="Inga events ännu." field="description" />
