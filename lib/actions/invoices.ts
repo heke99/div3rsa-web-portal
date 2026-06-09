@@ -6,6 +6,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { requireAdmin, requireUser } from '@/lib/auth/session'
 import { sendSmtpMail } from '@/lib/mail/smtp'
 import { buildInvoiceHtml, calculateInvoiceTotals, getInvoiceSettings, getNextInvoiceNumber, invoiceItemRows, resolveAccountingSyncStatus, type InvoiceLineInput } from '@/lib/invoices'
+import { enqueueWebhookEvent } from '@/lib/webhooks'
 import type { ActionState } from '@/lib/actions/applications'
 
 function str(formData: FormData, key: string) {
@@ -146,6 +147,7 @@ export async function saveInvoiceDraftAction(_prev: ActionState, formData: FormD
 
   await supabase.from('invoice_items').insert(invoiceItemRows(invoice.id, lines))
   await supabase.from('invoice_events').insert({ invoice_id: invoice.id, payment_customer_id: customerId, actor_user_id: user.id, actor_role: user.role, event_type: 'invoice_created', description: 'Faktura skapades som utkast.', metadata: { line_count: lines.length } })
+  await enqueueWebhookEvent({ paymentCustomerId: customerId, eventType: 'invoice.created', source: 'portal', entityType: 'invoice', entityId: invoice.id, payload: { invoice_id: invoice.id, status: invoice.status, total_amount: invoice.total_amount, currency: invoice.currency } })
   if (lines.some((line) => line.product_id)) {
     await supabase.from('invoice_events').insert({ invoice_id: invoice.id, payment_customer_id: customerId, actor_user_id: user.id, actor_role: user.role, event_type: 'product_added', description: 'En eller flera artiklar kopplades till fakturan.' })
   }
@@ -222,8 +224,15 @@ async function sendInvoiceById(input: { invoiceId: string; customerId?: string; 
     metadata: { email_log_id: emailLog?.id || null },
   })
 
+  if (emailStatus === 'sent') {
+    await enqueueWebhookEvent({ paymentCustomerId: effectiveCustomerId, eventType: alreadySent ? 'email.sent' : 'invoice.sent', source: 'portal', entityType: 'invoice', entityId: invoiceId, payload: { invoice_id: invoiceId, invoice_number: invoiceNumber, status: updatePayload.status || invoice.status } })
+  } else {
+    await enqueueWebhookEvent({ paymentCustomerId: effectiveCustomerId, eventType: 'email.failed', source: 'portal', entityType: 'invoice', entityId: invoiceId, payload: { invoice_id: invoiceId, error: errorMessage } })
+  }
+
   if (emailStatus === 'sent' && accountingSyncStatus === 'queued' && !alreadySent) {
-    await supabase.from('accounting_sync_jobs').insert({ payment_customer_id: effectiveCustomerId, invoice_id: invoiceId, provider: 'internal', status: 'queued' })
+    await supabase.from('accounting_sync_jobs').insert({ payment_customer_id: effectiveCustomerId, invoice_id: invoiceId, provider: 'internal', status: 'queued', source_type: 'invoice', source_id: invoiceId })
+    await enqueueWebhookEvent({ paymentCustomerId: effectiveCustomerId, eventType: 'accounting.sync.queued', source: 'portal', entityType: 'invoice', entityId: invoiceId, payload: { invoice_id: invoiceId, status: 'queued' } })
   }
 
   return { ok: emailStatus === 'sent', message: emailStatus === 'sent' ? (alreadySent ? 'Fakturan skickades om.' : 'Fakturan skickades.') : 'Fakturan sparades, men mail kunde inte skickas.' }
@@ -264,6 +273,7 @@ export async function markInvoicePaidAction(_prev: ActionState, formData: FormDa
   await supabase.from('invoice_payments').insert({ invoice_id: invoiceId, payment_customer_id: customerId, amount, paid_at: paidAt, reference, method: 'manual', created_by: user.id })
   await supabase.from('invoices').update({ status: 'paid', paid_at: paidAt, updated_at: new Date().toISOString() }).eq('id', invoiceId)
   await supabase.from('invoice_events').insert({ invoice_id: invoiceId, payment_customer_id: customerId, actor_user_id: user.id, actor_role: user.role, event_type: 'invoice_marked_paid', description: 'Fakturan markerades som betald manuellt.', metadata: { amount } })
+  await enqueueWebhookEvent({ paymentCustomerId: customerId, eventType: 'invoice.paid', source: 'portal', entityType: 'invoice', entityId: invoiceId, payload: { invoice_id: invoiceId, amount, paid_at: paidAt } })
   revalidatePath('/invoices')
   revalidatePath(`/invoices/${invoiceId}`)
   return { ok: true, message: 'Fakturan markerades som betald.' }

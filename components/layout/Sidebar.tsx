@@ -9,6 +9,7 @@ const adminLinks = [
   { href: '/admin/invoice-templates', label: 'Fakturamallar' },
   { href: '/admin/recurring-invoices', label: 'Återkommande' },
   { href: '/admin/api', label: 'API' },
+  { href: '/admin/webhooks', label: 'Webhooks' },
   { href: '/admin/accounting-access', label: 'Accounting' },
   { href: '/admin/support', label: 'Support' },
   { href: '/admin/audit-logs', label: 'Audit logs' },
@@ -25,6 +26,7 @@ const customerLinks = [
   { href: '/recurring-invoices', label: 'Återkommande fakturor' },
   { href: '/api-webhooks', label: 'API & Webhooks' },
   { href: '/accounting', label: 'Accounting' },
+  { href: '/docs', label: 'Guider' },
   { href: '/support', label: 'Support' },
   { href: '/settings/company', label: 'Företagsuppgifter' },
 ]

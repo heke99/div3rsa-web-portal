@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { apiError, authenticateApiRequest, logApiRequest } from '@/lib/api/auth'
+import { enqueueWebhookEvent } from '@/lib/webhooks'
 
 export const dynamic = 'force-dynamic'
 
@@ -16,6 +17,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   await auth.supabase.from('invoice_payments').insert({ invoice_id: id, payment_customer_id: auth.customerId, amount, paid_at: paidAt, reference: body.reference || null, method: 'api' })
   await auth.supabase.from('invoices').update({ status: 'paid', paid_at: paidAt, updated_at: new Date().toISOString() }).eq('id', id).eq('payment_customer_id', auth.customerId)
   await auth.supabase.from('invoice_events').insert({ invoice_id: id, payment_customer_id: auth.customerId, actor_role: 'api', event_type: 'invoice_marked_paid', description: 'Faktura markerades som betald via API.', metadata: { amount } })
+  await enqueueWebhookEvent({ paymentCustomerId: auth.customerId, eventType: 'invoice.paid', source: 'api', entityType: 'invoice', entityId: id, payload: { invoice_id: id, amount, paid_at: paidAt } })
   await logApiRequest({ auth, request, statusCode: 200 })
   return NextResponse.json({ data: { id, status: 'paid', paid_at: paidAt } })
 }

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { apiError, authenticateApiRequest, logApiRequest } from '@/lib/api/auth'
 import { calculateInvoiceTotals, invoiceItemRows, type InvoiceLineInput } from '@/lib/invoices'
+import { enqueueWebhookEvent } from '@/lib/webhooks'
 
 export const dynamic = 'force-dynamic'
 
@@ -56,6 +57,7 @@ export async function POST(request: Request) {
   if (error || !invoice) { await logApiRequest({ auth, request, statusCode: 500, errorMessage: error?.message }); return apiError('Could not create invoice.', 500) }
   await auth.supabase.from('invoice_items').insert(invoiceItemRows(invoice.id, lines))
   await auth.supabase.from('invoice_events').insert({ invoice_id: invoice.id, payment_customer_id: auth.customerId, actor_role: 'api', event_type: 'invoice_created', description: 'Faktura skapades via API.' })
+  await enqueueWebhookEvent({ paymentCustomerId: auth.customerId, eventType: 'invoice.created', source: 'api', entityType: 'invoice', entityId: invoice.id, payload: { invoice_id: invoice.id, status: invoice.status, total_amount: invoice.total_amount, currency: invoice.currency } })
   await logApiRequest({ auth, request, statusCode: 201 })
   return NextResponse.json({ data: invoice }, { status: 201 })
 }

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { apiError, authenticateApiRequest, logApiRequest } from '@/lib/api/auth'
 import { sendSmtpMail } from '@/lib/mail/smtp'
 import { buildInvoiceHtml, getInvoiceSettings, getNextInvoiceNumber, resolveAccountingSyncStatus } from '@/lib/invoices'
+import { enqueueWebhookEvent } from '@/lib/webhooks'
 
 export const dynamic = 'force-dynamic'
 
@@ -40,10 +41,12 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     const accountingSyncStatus = await resolveAccountingSyncStatus(auth.customerId)
     await auth.supabase.from('invoices').update({ invoice_number: invoiceNumber, status: ['paid','overdue','cancelled','credited'].includes(invoice.status) ? invoice.status : 'sent', sent_at: invoice.sent_at || new Date().toISOString(), accounting_sync_status: accountingSyncStatus, updated_at: new Date().toISOString() }).eq('id', id).eq('payment_customer_id', auth.customerId)
     await auth.supabase.from('invoice_events').insert({ invoice_id: id, payment_customer_id: auth.customerId, actor_role: 'api', event_type: alreadySent ? 'invoice_resent' : 'invoice_sent', description: alreadySent ? 'Faktura skickades om via API.' : 'Faktura skickades via API.', metadata: { email_log_id: emailLog?.id || null } })
+    await enqueueWebhookEvent({ paymentCustomerId: auth.customerId, eventType: alreadySent ? 'email.sent' : 'invoice.sent', source: 'api', entityType: 'invoice', entityId: id, payload: { invoice_id: id, invoice_number: invoiceNumber, status: 'sent' } })
     await logApiRequest({ auth, request, statusCode: 200 })
     return NextResponse.json({ data: { id, status: 'sent', invoice_number: invoiceNumber } })
   }
   await auth.supabase.from('invoice_events').insert({ invoice_id: id, payment_customer_id: auth.customerId, actor_role: 'api', event_type: 'invoice_email_failed', description: `API SMTP-fel: ${errorMessage}`, metadata: { email_log_id: emailLog?.id || null } })
+  await enqueueWebhookEvent({ paymentCustomerId: auth.customerId, eventType: 'email.failed', source: 'api', entityType: 'invoice', entityId: id, payload: { invoice_id: id, error: errorMessage } })
   await logApiRequest({ auth, request, statusCode: 502, errorMessage })
   return apiError('Invoice email failed.', 502)
 }
